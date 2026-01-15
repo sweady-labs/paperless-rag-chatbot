@@ -265,11 +265,44 @@ python -c "from FlagEmbedding import BGEM3FlagModel; BGEM3FlagModel('BAAI/bge-m3
 
 ## Example Queries
 
+### Simple Queries (Standard Mode)
 - "What invoices do I have from 2024?"
 - "Summarize my tax documents"
 - "Find all contracts related to insurance"
 - "What documents mention warranty?"
 - "Show me correspondence from John Doe"
+
+### Analytical Queries (Enhanced Mode)
+For queries requiring analysis across **many documents** (e.g., monthly reports, salary slips, invoices):
+
+**✅ Effective queries:**
+- "Liste **alle** Gehaltsabrechnungen 2017 mit Lohnsteuer auf"
+- "Zeige mir eine **Übersicht** aller Steuerzahlungen pro Monat 2017"
+- "Erstelle eine **Tabelle** mit allen Rechnungen und Beträgen aus 2024"
+- "**Jeder Monat**: Wie hoch war meine Lohnsteuer 2017?"
+
+**Trigger words** for enhanced retrieval (automatically detected):
+- `alle` / `all`
+- `gesamt` / `total`
+- `übersicht` / `overview`
+- `tabelle` / `table`
+- `liste` / `list`
+- `pro monat` / `per month`
+- `jeden monat` / `each month`
+
+When these keywords are detected, the system will:
+1. Retrieve **up to 50 chunks** instead of 5-10
+2. Instruct the LLM to analyze **each document individually**
+3. Format results as **tables or lists**
+4. Provide a **summary/total** at the end
+
+**💡 Pro Tip:** For monthly salary data:
+```
+"Erstelle eine Tabelle: 2017 Gehaltsabrechnungen - 
+Monat | Dokument | Lohnsteuer"
+```
+
+The chatbot will then extract data from each payslip and present it in table format.
 
 ## Performance
 

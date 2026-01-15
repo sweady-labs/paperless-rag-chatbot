@@ -45,6 +45,9 @@ def get_bge_m3_model():
     return _MODEL_CACHE['bge_m3']
 
 
+from src.utils.id_utils import stable_int_id
+
+
 class HybridVectorStore:
     """Optimized vector store mit cached BGE-M3 model."""
     
@@ -131,7 +134,7 @@ class HybridVectorStore:
             
             points = []
             for idx, (text, metadata) in enumerate(zip(texts, metadatas)):
-                point_id = hash(f"{metadata['document_id']}_{metadata['chunk_index']}") & 0x7FFFFFFF
+                point_id = stable_int_id(f"{metadata['document_id']}_{metadata['chunk_index']}")
                 
                 # Sparse vector
                 sparse_dict = sparse_vecs[idx]
@@ -172,7 +175,7 @@ class HybridVectorStore:
             
             points = []
             for idx, (vec, text, metadata) in enumerate(zip(dense_vecs, texts, metadatas)):
-                point_id = hash(f"{metadata['document_id']}_{metadata['chunk_index']}") & 0x7FFFFFFF
+                point_id = stable_int_id(f"{metadata['document_id']}_{metadata['chunk_index']}")
                 
                 points.append(PointStruct(
                     id=point_id,
@@ -194,10 +197,15 @@ class HybridVectorStore:
             self.client.upsert(collection_name=self.collection_name, points=points)
             print(f"✅ Added {len(points)} chunks (dense only)")
     
-    def search(self, query: str, n_results: int = 10) -> List[Dict]:
+    def search(self, query: str, n_results: int = 10, metadata_filter: Optional[Dict] = None) -> List[Dict]:
         """
         OPTIMIZED hybrid search - OHNE compute_score (zu langsam!)
         Nutzt Qdrant's native hybrid search stattdessen.
+        
+        Args:
+            query: Search query
+            n_results: Number of results to return
+            metadata_filter: Optional filter dict, e.g. {'correspondent': 'Amazon', 'year': 2024}
         """
         if not self.use_full_bge_m3:
             # Fallback: dense only
@@ -225,22 +233,34 @@ class HybridVectorStore:
         sparse_indices = list(sparse_dict.keys())
         sparse_values = list(sparse_dict.values())
         
+        # Build Qdrant filter from metadata_filter if provided
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        query_filter = None
+        if metadata_filter:
+            conditions = []
+            for key, value in metadata_filter.items():
+                conditions.append(FieldCondition(key=key, match=MatchValue(value=value)))
+            if conditions:
+                query_filter = Filter(must=conditions)
+        
         # Multi-vector search mit Qdrant
-        # 1. Dense search
+        # 1. Dense search - mehr initiale Ergebnisse für bessere Abdeckung
         dense_results = self.client.query_points(
             collection_name=self.collection_name,
             query=dense_vec.tolist(),
             using="dense",
-            limit=n_results * 2  # Get more for reranking
+            limit=n_results * 3,  # 3x für bessere Abdeckung
+            query_filter=query_filter
         ).points
         
-        # 2. Sparse search
+        # 2. Sparse search - besonders wichtig für Keywords (Amazon, Monate, etc.)
         try:
             sparse_results = self.client.query_points(
                 collection_name=self.collection_name,
                 query={"indices": sparse_indices, "values": sparse_values},
                 using="sparse",
-                limit=n_results * 2
+                limit=n_results * 3,  # 3x für bessere Keyword-Abdeckung
+                query_filter=query_filter
             ).points
         except:
             sparse_results = []

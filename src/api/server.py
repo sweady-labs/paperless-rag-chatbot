@@ -30,7 +30,7 @@ print("✅ API ready!")
 
 class QueryRequest(BaseModel):
     question: str
-    n_results: Optional[int] = 5  # Reduced to 5 for better performance
+    n_results: Optional[int] = 10  # Default 10, can be increased for analytical queries
 
 class QueryResponse(BaseModel):
     answer: str

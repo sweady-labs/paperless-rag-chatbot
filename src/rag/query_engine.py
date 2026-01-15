@@ -1,6 +1,6 @@
 from langchain_community.llms import Ollama
 from langchain_core.prompts import PromptTemplate
-from typing import List, Dict
+from typing import List, Dict, Optional
 import os
 from dotenv import load_dotenv
 from .reranker import Reranker
@@ -45,7 +45,12 @@ class QueryEngine:
 
 Nutze den folgenden Kontext aus relevanten Dokumenten um die Frage zu beantworten. Wenn die Antwort nicht im Kontext zu finden ist, sage das klar und deutlich.
 
-WICHTIG: Antworte in der gleichen Sprache wie die Frage gestellt wurde. Nutze NIE chinesische Zeichen.
+WICHTIG: 
+- Antworte in der gleichen Sprache wie die Frage gestellt wurde. Nutze NIE chinesische Zeichen.
+- Wenn nach ALLEN Dokumenten, einer ÜBERSICHT oder TABELLE gefragt wird, analysiere JEDEN einzelnen Kontext-Block
+- Extrahiere die relevanten Daten aus JEDEM Dokument und präsentiere sie in tabellarischer oder Listenform
+- Bei Gehaltsabrechnungen: Zeige Monat, Dokument-Titel und den konkreten Betrag für jeden Eintrag
+- Summiere am Ende die Gesamtsumme
 
 Kontext aus Dokumenten:
 {context}
@@ -67,14 +72,30 @@ Antwort:"""
         Returns:
             Dict with 'answer', 'sources', 'context', 'method'
         """
-        # 1. Retrieve with BGE-M3 hybrid search (reduced multiplier for speed)
-        initial_k = min(n_results * 2, 15) if self.use_reranker else n_results
+        # Detect if this is an analytical query requiring many documents
+        analytical_keywords = ['alle', 'gesamt', 'pro monat', 'übersicht', 'tabelle', 'liste', 'jeden monat',
+                              'all', 'total', 'overview', 'table', 'list', 'per month', 'each month', 
+                              'summiere', 'sum', 'zusammen']
+        is_analytical = any(keyword in question.lower() for keyword in analytical_keywords)
+        
+        # Extract metadata filters from query (simple keyword detection)
+        metadata_filter = self._extract_metadata_filter(question)
+        
+        # 1. Retrieve with BGE-M3 hybrid search
+        if is_analytical:
+            # For analytical queries: retrieve MORE documents (up to 60)
+            initial_k = min(n_results * 4, 60) if self.use_reranker else min(n_results * 3, 50)
+        else:
+            # Standard queries: moderate amount
+            initial_k = min(n_results * 2, 20) if self.use_reranker else n_results
         
         if self.is_hybrid:
-            results = self.vector_store.search(question, n_results=initial_k)
+            results = self.vector_store.search(question, n_results=initial_k, metadata_filter=metadata_filter)
             method = 'bge-m3-hybrid'
+            if metadata_filter:
+                method += '+filtered'
         else:
-            results = self.vector_store.search(question, n_results=initial_k)
+            results = self.vector_store.search(question, n_results=initial_k, metadata_filter=metadata_filter)
             method = 'dense-only'
         
         if not results:
@@ -144,3 +165,30 @@ Antwort:"""
             'context': context_parts,
             'method': method
         }
+    
+    def _extract_metadata_filter(self, question: str) -> Optional[Dict]:
+        """Extract metadata filters from question for faster retrieval."""
+        import re
+        filter_dict = {}
+        
+        # Extract correspondent names (Amazon, REWE, etc.)
+        # Common patterns: "bei Amazon", "von Amazon", "at Amazon", "from Amazon"
+        correspondent_patterns = [
+            r'bei\s+(\w+)',
+            r'von\s+(\w+)',
+            r'at\s+(\w+)',
+            r'from\s+(\w+)',
+        ]
+        for pattern in correspondent_patterns:
+            match = re.search(pattern, question, re.IGNORECASE)
+            if match:
+                correspondent = match.group(1).capitalize()
+                # Only add if it looks like a company name (capitalized)
+                if len(correspondent) > 2:
+                    filter_dict['correspondent'] = correspondent
+                    break
+        
+        # Note: Date filtering would require parsing dates from created/modified fields
+        # This is complex and better handled by improving the query itself
+        
+        return filter_dict if filter_dict else None

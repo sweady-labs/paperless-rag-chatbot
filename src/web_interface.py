@@ -11,9 +11,16 @@ API_URL = "http://localhost:8001"
 def query_chatbot(message, history):
     """Query the RAG chatbot"""
     try:
+        # Auto-detect analytical queries and increase n_results
+        analytical_keywords = ['alle', 'gesamt', 'pro monat', 'übersicht', 'tabelle', 'liste', 'jeden monat', 
+                              'all', 'total', 'overview', 'table', 'list', 'per month', 'each month']
+        is_analytical = any(keyword in message.lower() for keyword in analytical_keywords)
+        
+        n_results = 20 if is_analytical else 10  # More results for analytical queries
+        
         response = requests.post(
             f"{API_URL}/query",
-            json={"question": message, "n_results": 3},  # Reduced to 3 for faster responses
+            json={"question": message, "n_results": n_results},
             timeout=120  # Increased for complex LLM queries
         )
         
@@ -73,9 +80,11 @@ with gr.Blocks(title="Paperless RAG Chatbot") as demo:
             chatbot = gr.ChatInterface(
                 query_chatbot,
                 examples=[
-                    "What invoices do I have from 2024?",
-                    "Summarize my tax documents",
-                    "Find contracts related to insurance",
+                    "Was habe ich 2024 an Steuern gezahlt?",
+                    "Liste alle Gehaltsabrechnungen 2017 mit Lohnsteuer auf",
+                    "Erstelle eine Tabelle aller Rechnungen aus 2024",
+                    "Zeige mir eine Übersicht meiner monatlichen Zahlungen 2017",
+                    "Find all contracts related to insurance",
                     "What documents mention payments?"
                 ]
             )

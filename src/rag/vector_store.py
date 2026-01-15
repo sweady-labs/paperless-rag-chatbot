@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from src.utils.id_utils import stable_int_id
+
 # Try to use native BGE-M3 for best performance
 try:
     from FlagEmbedding import BGEM3FlagModel
@@ -88,8 +90,9 @@ class VectorStore:
         points = []
         for i, (text, metadata, embedding) in enumerate(zip(texts, metadatas, embeddings)):
             point_id = f"{metadata['document_id']}_{metadata['chunk_index']}"
-            # Qdrant requires integer IDs, so we'll use a hash
-            point_id_int = hash(point_id) & 0x7FFFFFFF  # Ensure positive integer
+            # Stable integer id using SHA256 (63-bit positive)
+            from hashlib import sha256
+            point_id_int = stable_int_id(point_id)
             
             points.append(
                 PointStruct(
