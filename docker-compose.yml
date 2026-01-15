@@ -22,7 +22,7 @@ services:
       # Ollama runs on host machine
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       # Paperless on local network
-      - PAPERLESS_URL=${PAPERLESS_URL:-http://192.168.178.111:8000}
+      - PAPERLESS_URL=${PAPERLESS_URL:-http://localhost:8000}
       - PAPERLESS_TOKEN=${PAPERLESS_TOKEN}
       # Auto-index on startup (set to 'false' to skip)
       - AUTO_INDEX=${AUTO_INDEX:-false}

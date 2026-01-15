@@ -187,7 +187,7 @@ Edit `.env` to customize settings:
 
 ```bash
 # Paperless Connection
-PAPERLESS_URL=http://192.168.178.111:8000
+PAPERLESS_URL=http://localhost:8000
 PAPERLESS_TOKEN=your_api_token_here
 
 # Ollama Settings

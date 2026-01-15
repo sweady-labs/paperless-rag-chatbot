@@ -16,7 +16,7 @@ cp .env.example .env
 
 Edit `.env`:
 ```bash
-PAPERLESS_URL=http://192.168.178.111:8000
+PAPERLESS_URL=http://localhost:8000
 PAPERLESS_TOKEN=your_token_here
 OLLAMA_MODEL=gemma2:2b  # Or your preferred model
 ```
