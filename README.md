@@ -16,22 +16,34 @@ AI-powered chatbot for querying documents in Paperless-NGX using RAG (Retrieval-
 - **Docker Support**: Easy deployment with Docker Compose
 - **Clickable Links**: Direct links to documents in Paperless
 
+## Prerequisites
+
+- Python 3.11+
+- [Ollama](https://ollama.ai/) installed and running
+- Paperless-NGX instance with API access
+- Paperless API token ([create one in Paperless settings](https://docs.paperless-ngx.com/api/#authorization))
+
 ## Quick Start (Docker - Recommended)
 
-**Easiest way to run:**
-
 ```bash
-# 1. Configure your settings
-cp .env.example .env
-# Edit .env with your Paperless URL and token
+# 1. Clone the repository
+git clone https://github.com/sweady-labs/paperless-rag-chatbot.git
+cd paperless-rag-chatbot
 
-# 2. Make sure Ollama is running on your host
+# 2. Configure your settings
+cp .env.example .env
+nano .env  # Edit with your Paperless URL and API token
+
+# 3. Make sure Ollama is running on your host
 ollama serve
 
-# 3. Start everything with Docker
+# 4. Pull the required Ollama model
+ollama pull gemma2:2b
+
+# 5. Start everything with Docker
 docker-compose up -d
 
-# 4. Access the Web Interface
+# 6. Access the Web Interface
 # Open http://localhost:7860
 ```
 
@@ -39,104 +51,102 @@ See [README-DOCKER.md](README-DOCKER.md) for detailed Docker documentation.
 
 ## Alternative: Manual Installation
 
-### Prerequisites
-
-- Python 3.11+
-- Ollama installed on Mac
-- Paperless-NGX running (http://192.168.178.111:8000)
-- Paperless API token
-
-## Quick Start (Manual)
-
-### 1. Install Dependencies
+### 1. Clone and Setup
 
 ```bash
-cd ~/paperless-rag-chatbot
+git clone https://github.com/sweady-labs/paperless-rag-chatbot.git
+cd paperless-rag-chatbot
+
+# Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 2. Install Ollama Model
+### 2. Configure Environment
+
+```bash
+cp .env.example .env
+nano .env  # Edit with your settings
+```
+
+Required settings in `.env`:
+```bash
+PAPERLESS_URL=http://your-paperless-url:8000
+PAPERLESS_TOKEN=your_api_token_here
+OLLAMA_MODEL=gemma2:2b
+```
+
+### 3. Install Ollama Models
 
 ```bash
 # Install the lightweight model (recommended)
 ollama pull gemma2:2b
 
-# Or use a more powerful model if you need better quality
+# Or use a more powerful model for better quality
 # ollama pull llama3.1:8b
+# ollama pull qwen2.5:7b
 
-# Note: BGE-M3 embeddings are downloaded automatically via HuggingFace
+# Note: BGE-M3 embeddings are downloaded automatically on first use
 ```
 
-### 3. Configure Environment
+### 4. Run the Application
 
-The `.env` file is already configured. Verify it contains:
-- PAPERLESS_URL=http://192.168.178.111:8000
-- PAPERLESS_TOKEN=your_token
-- OLLAMA_MODEL=gemma2:2b  # For fast responses
-
-### 4. Start the Chatbot
-
+**Easy start (recommended):**
 ```bash
-# Use the all-in-one startup script
 ./start.sh
-
-# Keep existing vectors instead of clearing
-python src/indexer.py --keep-existing
 ```
-
-This will:
-- Fetch all documents from Paperless-NGX
-- Chunk them into optimal sizes for BGE-M3 (up to 8K tokens)
-- Generate dense, sparse, and ColBERT embeddings
-- Store in Qdrant vector database with Named Vectors support
-
-### 5. Start the API Server
-
-```bash
-python src/api/server.py
-```
-
-Server will start at: http://localhost:8001
-
-### 6. Use the Chatbot
-
-**Option A: CLI Interface**
-
 
 Select from menu:
-1) Index documents (first time or update)
-2) Start API server
-3) Start Web Interface
-4) Start CLI Chat
-5) Debug: Test query
-```
+1. Index documents (first time or update)
+2. Start API server
+3. Start Web Interface
+4. Start CLI Chat
+5. Debug: Test query
 
-This will:
-- Check if Ollama is running
-- Verify required models
-- Start your selected interface
+**Or run components manually:**
 
-### Alternative: Manual Steps
-
-**Start API Server**
 ```bash
+# Index documents first
+python src/indexer.py
+
+# Start API Server
 python -m uvicorn src.api.server:app --host 0.0.0.0 --port 8001
-```
 
-**Start Web Interface**
-```bash
+# Start Web Interface (in another terminal)
 python src/web_interface.py
-```
-Then open: http://localhost:7860
+# Then open: http://localhost:7860
 
-**Start CLI Chat**
-```bash
+# Or start CLI Chat
 python src/cli_chat.py
 ```
 
-## API Endpoints
+## Usage
+
+### Web Interface
+
+1. Open http://localhost:7860
+2. Type your question in the chat box
+3. Click on document links to open them in Paperless-NGX
+
+### API
+
+```bash
+# Query documents
+curl -X POST "http://localhost:8001/query" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Show me invoices from 2024"}'
+
+# Check health
+curl http://localhost:8001/health
+
+# View API docs
+open http://localhost:8001/docs
+```
+
+### API Endpoints
 
 - `GET /` - API information
 - `POST /query` - Query documents
@@ -149,9 +159,11 @@ python src/cli_chat.py
 
 ```
 paperless-rag-chatbot/
-├── .env                    # Configuration
+├── .env.example            # Example configuration
 ├── requirements.txt        # Python dependencies
 ├── start.sh               # All-in-one startup script
+├── docker-compose.yml     # Docker deployment
+├── Dockerfile             # Docker image
 ├── src/
 │   ├── api/
 │   │   ├── paperless_client.py  # Paperless API integration
@@ -159,7 +171,7 @@ paperless-rag-chatbot/
 │   ├── rag/
 │   │   ├── chunker.py           # Document chunking
 │   │   ├── vector_store.py      # Dense-only Qdrant store
-│   │   ├── hybrid_vector_store.py  # BGE-M3 hybrid store (used by default)
+│   │   ├── hybrid_vector_store.py  # BGE-M3 hybrid store (default)
 │   │   ├── query_engine.py      # RAG query logic
 │   │   └── reranker.py          # Re-ranking for accuracy
 │   ├── indexer.py          # Document indexing script
@@ -171,27 +183,43 @@ paperless-rag-chatbot/
 
 ## Configuration
 
-Edit `.env` to customize:
+Edit `.env` to customize settings:
 
 ```bash
-# Model Selection
-OLLAMA_MODEL=gemma2:2b             # Lightweight and fast
-# Alternative models: llama3.1:8b, qwen2.5:7b, phi3:3.8b
+# Paperless Connection
+PAPERLESS_URL=http://192.168.178.111:8000
+PAPERLESS_TOKEN=your_api_token_here
 
-OLLAMA_EMBEDDING_MODEL=bge-m3      # BGE-M3 embeddings (auto-downloaded)
+# Ollama Settings
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=gemma2:2b        # Lightweight and fast
+OLLAMA_EMBEDDING_MODEL=bge-m3 # BGE-M3 embeddings
 
 # Chunking (optimized for BGE-M3's 8K token window)
-CHUNK_SIZE=800                     # Tokens per chunk
-CHUNK_OVERLAP=150                  # Overlap between chunks
+CHUNK_SIZE=800                # Tokens per chunk
+CHUNK_OVERLAP=150             # Overlap between chunks
 
-# BGE-M3 Retrieval Weights (dense, sparse, colbert)
-# Default: [0.4, 0.2, 0.4] as recommended by BGE-M3 authors
-BGE_M3_WEIGHTS=0.4,0.2,0.4
+# BGE-M3 Hybrid Search Weights
+BGE_M3_DENSE_WEIGHT=0.4       # Semantic similarity
+BGE_M3_SPARSE_WEIGHT=0.4      # Keyword matching
+BGE_M3_COLBERT_WEIGHT=0.2     # Token-level matching
 
-# Vector DB
-VECTOR_DB_PATH=./data/vector_db
-COLLECTION_NAME=paperless_documents
+# Performance
+BGE_M3_USE_FP16=true          # Faster processing
+BGE_M3_MAX_LENGTH=8192        # Max tokens per document
+RERANK_TOP_K=10               # Number of results to rerank
 ```
+
+### Model Options
+
+**LLM Models (OLLAMA_MODEL):**
+- `gemma2:2b` - Fastest, lowest resource usage (recommended for quick responses)
+- `llama3.1:8b` - Balanced performance and quality
+- `qwen2.5:7b` - Great balance, good multilingual support
+- `qwen2.5:14b` - Best quality, higher resource usage
+
+**Embedding Model:**
+- `bge-m3` - Used automatically, no need to change
 
 ## Troubleshooting
 
@@ -199,6 +227,9 @@ COLLECTION_NAME=paperless_documents
 ```bash
 # Start Ollama service
 ollama serve
+
+# Check if running
+curl http://localhost:11434/api/tags
 ```
 
 ### "FlagEmbedding not found" or import errors
@@ -207,29 +238,30 @@ source venv/bin/activate
 pip install -r requirements.txt --upgrade
 ```
 
-### "Import errors" when running scripts
-Make sure you're in the virtual environment:
-```bash
-source venv/bin/activate
-```
-
-### Slow or poor quality answers
-1. Try using a larger model: `OLLAMA_MODEL=qwen2.5:14b`
-2. Adjust BGE-M3 weights in queries (increase dense weight for semantic, sparse for exact matches)
-3. Increase chunk sizes for longer context: `CHUNK_SIZE=2000`
-4. Use re-ranking (enabled by default)
-
 ### Documents not indexed
-1. Check Paperless connection: `curl http://192.168.178.111:8000/api/documents/ -H "Authorization: Token YOUR_TOKEN"`
+1. Check Paperless connection:
+```bash
+curl http://your-paperless-url:8000/api/documents/ \
+  -H "Authorization: Token YOUR_TOKEN"
+```
 2. Verify documents have content (OCR completed)
 3. Check logs when running `python src/indexer.py`
 
 ### BGE-M3 model download issues
-The model (~2.3GB) downloads automatically on first use. If you have network issues:
+The model (~2.3GB) downloads automatically on first use. To pre-download:
 ```bash
-# Pre-download the model
 python -c "from FlagEmbedding import BGEM3FlagModel; BGEM3FlagModel('BAAI/bge-m3')"
 ```
+
+### Slow queries
+1. Try a smaller LLM model: `OLLAMA_MODEL=gemma2:2b`
+2. Reduce chunk size: `CHUNK_SIZE=600`
+3. Adjust weights to favor dense search: `BGE_M3_DENSE_WEIGHT=0.6`
+
+### Out of memory
+1. Use a smaller model: `OLLAMA_MODEL=gemma2:2b`
+2. Enable FP16: `BGE_M3_USE_FP16=true`
+3. Close other applications
 
 ## Example Queries
 
@@ -243,41 +275,58 @@ python -c "from FlagEmbedding import BGEM3FlagModel; BGEM3FlagModel('BAAI/bge-m3
 
 **Mac M5 Pro with BGE-M3:**
 - **First Run**: BGE-M3 model download (~2.3GB, one-time)
-- **Indexing**: ~5-30 docs/minute (BGE-M3 is more thorough)
+- **Indexing**: ~5-30 docs/minute (depends on document size)
 - **Query**: 2-6 seconds average (hybrid search + reranking)
 - **Memory**: ~8-12 GB (LLM + BGE-M3 + embeddings)
 
 **Recommended Settings:**
-- **LLM**: qwen2.5:7b (balanced) or qwen2.5:14b (best quality)
-- **Chunk size**: 1000-2000 tokens (BGE-M3 handles up to 8192)
-- **Retrieval weights**: [0.4, 0.2, 0.4] (dense, sparse, colbert)
+- **LLM**: `gemma2:2b` (fast) or `qwen2.5:7b` (balanced)
+- **Chunk size**: 800-2000 tokens (BGE-M3 handles up to 8192)
+- **Retrieval weights**: [0.4, 0.4, 0.2] (dense, sparse, colbert)
 - **Use FP16**: Enabled by default for speed
-
-**Speed vs Accuracy Trade-offs:**
-- Fastest: Dense-only (`--no-hybrid`) ~2-3s/query
-- Balanced: Hybrid + fast rerank ~4-5s/query (default)
-- Best: Hybrid + LLM rerank ~6-10s/query
 
 ## Advanced Features
 
+### Re-indexing with Existing Vectors
+
+Keep your existing vector database when adding new documents:
+```bash
+python src/indexer.py --keep-existing
+```
+
 ### Webhook Integration
 
-Add to Paperless-NGX webhook:
+Add to Paperless-NGX webhook settings:
 ```
-URL: http://YOUR_MAC_IP:8001/webhook/document-added
+URL: http://YOUR_IP:8001/webhook/document-added
 Event: Document Added
 ```
 
-### Docker Deployment
+### Custom Retrieval Weights
 
-Coming soon - Docker Compose setup for production.
+Adjust in `.env` based on your use case:
+- **More semantic search**: Increase `BGE_M3_DENSE_WEIGHT`
+- **Exact keyword matching**: Increase `BGE_M3_SPARSE_WEIGHT`
+- **Token-level precision**: Increase `BGE_M3_COLBERT_WEIGHT`
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
 MIT
 
+## Acknowledgments
+
+- [Paperless-NGX](https://github.com/paperless-ngx/paperless-ngx) - Document management system
+- [BGE-M3](https://github.com/FlagOpen/FlagEmbedding) - Multilingual embedding model
+- [Ollama](https://ollama.ai/) - Local LLM inference
+- [Qdrant](https://qdrant.tech/) - Vector database
+- [LangChain](https://python.langchain.com/) - RAG framework
+
 ## Support
 
 - Paperless-NGX Docs: https://docs.paperless-ngx.com/
 - Ollama: https://ollama.ai/
-- LangChain: https://python.langchain.com/
+- BGE-M3: https://github.com/FlagOpen/FlagEmbedding
