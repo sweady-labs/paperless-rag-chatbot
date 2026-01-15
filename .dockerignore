@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Data
+data/vector_db/*
+!data/vector_db/.gitkeep
+data/cache/*
+!data/cache/.gitkeep
+cache/
+
+# Environment
+.env
+.env.backup
+.env.new
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+!README.md
+
+# Scripts (will be copied explicitly if needed)
+start.sh
+
+# Misc
+.DS_Store

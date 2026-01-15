@@ -1,0 +1,64 @@
+services:
+  paperless-chatbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: paperless-rag-chatbot
+    restart: unless-stopped
+    
+    ports:
+      - "8001:8001"  # API Server
+      - "7860:7860"  # Web Interface
+    
+    volumes:
+      # Persistent vector database
+      - ./data:/app/data
+      # Mount .env file
+      - ./.env:/app/.env:ro
+      # Cache HuggingFace models (BGE-M3 is ~1.2GB)
+      - ./cache/huggingface:/root/.cache/huggingface
+    
+    environment:
+      # Ollama runs on host machine
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      # Paperless on local network
+      - PAPERLESS_URL=${PAPERLESS_URL:-http://192.168.178.111:8000}
+      - PAPERLESS_TOKEN=${PAPERLESS_TOKEN}
+      # Auto-index on startup (set to 'false' to skip)
+      - AUTO_INDEX=${AUTO_INDEX:-false}
+      # Check for new documents periodically
+      - AUTO_REINDEX_INTERVAL=${AUTO_REINDEX_INTERVAL:-0}  # 0 = disabled, otherwise minutes
+    
+    # Add host.docker.internal for Mac/Windows
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    depends_on:
+      - ollama-check
+  
+  # Helper service to verify Ollama is running
+  ollama-check:
+    image: curlimages/curl:latest
+    container_name: ollama-health-check
+    command: >
+      sh -c '
+        echo "⏳ Waiting for Ollama to be ready...";
+        until curl -f http://host.docker.internal:11434/api/tags > /dev/null 2>&1; do
+          echo "❌ Ollama not reachable, retrying in 5s...";
+          sleep 5;
+        done;
+        echo "✅ Ollama is ready!";
+      '
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  data:
+    driver: local
