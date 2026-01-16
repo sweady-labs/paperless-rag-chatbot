@@ -1,11 +1,8 @@
 from langchain_community.llms import Ollama
 from langchain_core.prompts import PromptTemplate
 from typing import List, Dict, Optional
-import os
-from dotenv import load_dotenv
+from src.config import settings
 from .reranker import Reranker
-
-load_dotenv()
 
 class QueryEngine:
     def __init__(self, vector_store, use_reranker: bool = True):
@@ -16,11 +13,11 @@ class QueryEngine:
         # Check if using BGE-M3 hybrid
         self.is_hybrid = hasattr(vector_store, 'model') and hasattr(vector_store.model, 'encode')
         
-        # Initialize Ollama with better model for German
-        model = os.getenv('OLLAMA_MODEL', 'llama3.1:8b')
+        # Initialize Ollama with configured model
+        model = settings.OLLAMA_MODEL
         self.llm = Ollama(
             model=model,
-            base_url=os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434'),
+            base_url=settings.OLLAMA_BASE_URL,
             temperature=0.1,
             num_predict=512,  # Limit response length for faster generation
             timeout=90,  # 90 second timeout for LLM calls
@@ -31,12 +28,14 @@ class QueryEngine:
         # Initialize reranker
         if self.use_reranker:
             self.reranker = Reranker()
-            print(f"✅ Query Engine initialized with {model} + Reranker")
+            logger = __import__('logging').getLogger(__name__)
+            logger.info(f"Query Engine initialized with {model} + Reranker")
         else:
-            print(f"✅ Query Engine initialized with {model}")
+            logger = __import__('logging').getLogger(__name__)
+            logger.info(f"Query Engine initialized with {model}")
         
         if self.is_hybrid:
-            print("✅ Using BGE-M3 hybrid search (dense + sparse + colbert)")
+            logger.info("Using BGE-M3 hybrid search (dense + sparse + colbert)")
         
         # Optimized RAG prompt template - clearer instructions
         self.prompt_template = PromptTemplate(

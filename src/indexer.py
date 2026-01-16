@@ -1,40 +1,27 @@
 import sys
 import os
+from src.config import settings
 
 # Add parent directory to path to enable imports
+# (keep for backwards compatibility; will remove later)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.api.paperless_client import PaperlessClient
 from src.rag.chunker import DocumentChunker
-from src.rag.vector_store import VectorStore
 from src.rag.hybrid_vector_store import HybridVectorStore
-from dotenv import load_dotenv
 from tqdm import tqdm
 import logging
 
-load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class DocumentIndexer:
-    def __init__(self, use_hybrid: bool = True):
-        """
-        Initialize document indexer.
-        
-        Args:
-            use_hybrid: If True, use BGE-M3 hybrid store (dense+sparse+colbert).
-                       If False, use simple dense-only store.
-        """
+    def __init__(self):
+        """Initialize document indexer with BGE-M3 hybrid vector store."""
         self.paperless = PaperlessClient()
         self.chunker = DocumentChunker()
-        
-        # Choose vector store based on configuration
-        if use_hybrid:
-            logger.info("Using BGE-M3 Hybrid Vector Store (recommended)")
-            self.vector_store = HybridVectorStore()
-        else:
-            logger.info("Using simple dense-only Vector Store")
-            self.vector_store = VectorStore()
+        logger.info("Using BGE-M3 Hybrid Vector Store with GPU acceleration")
+        self.vector_store = HybridVectorStore()
     
     def index_all_documents(self, clear_existing: bool = False):
         """Index all documents from Paperless-NGX"""
@@ -76,12 +63,10 @@ class DocumentIndexer:
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description='Index Paperless documents')
-    parser.add_argument('--no-hybrid', action='store_true', 
-                       help='Use dense-only search instead of BGE-M3 hybrid')
+    parser = argparse.ArgumentParser(description='Index Paperless documents with BGE-M3 hybrid search')
     parser.add_argument('--keep-existing', action='store_true',
                        help='Keep existing vectors instead of clearing')
     args = parser.parse_args()
     
-    indexer = DocumentIndexer(use_hybrid=not args.no_hybrid)
+    indexer = DocumentIndexer()
     indexer.index_all_documents(clear_existing=not args.keep_existing)

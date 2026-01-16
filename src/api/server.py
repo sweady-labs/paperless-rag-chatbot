@@ -1,32 +1,19 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
 from pydantic import BaseModel
 from typing import List, Optional
-import sys
-import os
+import asyncio
+import logging
 
-# Add parent directory to path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(os.path.dirname(current_dir))
-sys.path.insert(0, parent_dir)
-
-# Optimized imports with caching
 from src.rag.hybrid_vector_store import HybridVectorStore
 from src.rag.query_engine import QueryEngine
 from src.api.paperless_client import PaperlessClient
-from dotenv import load_dotenv
+from src.config import settings
 
-load_dotenv()
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Paperless RAG Chatbot API")
 
-# Initialize components - models are cached
-print("🚀 Initializing Paperless RAG Chatbot API...")
-print("   - Using cached BGE-M3 model")
-print("   - Using gemma2:2b for fast responses")
-vector_store = HybridVectorStore()
-query_engine = QueryEngine(vector_store, use_reranker=True)
-paperless_client = PaperlessClient()
-print("✅ API ready!")
+# Components will be initialized on startup and stored in app.state
 
 class QueryRequest(BaseModel):
     question: str
@@ -35,6 +22,22 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     answer: str
     sources: List[dict]
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize heavy components once on application startup and attach to app.state."""
+    logging.basicConfig(level=logging.INFO)
+    logger.info("Initializing Paperless RAG Chatbot API (startup)")
+
+    app.state.vector_store = HybridVectorStore()
+    app.state.query_engine = QueryEngine(app.state.vector_store, use_reranker=True)
+    app.state.paperless_client = PaperlessClient()
+
+    # concurrency semaphore to limit concurrent LLM/embedding requests
+    app.state.query_semaphore = asyncio.Semaphore(int(settings.MAX_CONCURRENT_QUERIES))
+    logger.info("API ready")
+
 
 @app.get("/")
 async def root():
@@ -56,28 +59,33 @@ async def root():
         "redoc": "/redoc (ReDoc)"
     }
 
+
 @app.post("/query", response_model=QueryResponse)
-async def query_documents(request: QueryRequest):
+async def query_documents(request: QueryRequest, req: Request):
     """Query documents using optimized RAG pipeline"""
     try:
-        result = query_engine.query(
-            question=request.question,
-            n_results=request.n_results,
-            fast_rerank=True  # Immer fast reranking nutzen
-        )
+        async with req.app.state.query_semaphore:
+            result = await asyncio.to_thread(
+                req.app.state.query_engine.query,
+                request.question,
+                request.n_results,
+                True  # fast_rerank
+            )
+
         return QueryResponse(
             answer=result['answer'],
             sources=result['sources']
         )
     except Exception as e:
-        print(f"❌ Query error: {e}")
+        logger.exception("Query error")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/health")
-async def health_check():
+async def health_check(req: Request):
     """Health check endpoint"""
     try:
-        info = vector_store.get_collection_info()
+        info = await asyncio.to_thread(req.app.state.vector_store.get_collection_info)
         return {
             "status": "healthy",
             "collection": info,
@@ -86,17 +94,21 @@ async def health_check():
             "version": "optimized"
         }
     except Exception as e:
+        logger.exception("Health check failed")
         return {
             "status": "unhealthy",
             "error": str(e)
         }
 
+
 @app.get("/stats")
-async def get_stats():
+async def get_stats(req: Request):
     """Get indexing statistics"""
     try:
-        info = vector_store.get_collection_info()
-        docs = paperless_client.get_all_documents()
+        info, docs = await asyncio.gather(
+            asyncio.to_thread(req.app.state.vector_store.get_collection_info),
+            asyncio.to_thread(req.app.state.paperless_client.get_all_documents)
+        )
         return {
             "total_documents_in_paperless": len(docs),
             "indexed_chunks": info['points_count'],
@@ -104,14 +116,16 @@ async def get_stats():
             "collection_type": info['type']
         }
     except Exception as e:
+        logger.exception("Failed to get stats")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/debug/search/{query}")
-async def debug_search(query: str, n_results: int = 3):
+async def debug_search(query: str, n_results: int = 3, req: Request = None):
     """Debug endpoint to see raw search results"""
     try:
-        results = vector_store.search(query, n_results=n_results)
-        
+        results = await asyncio.to_thread(req.app.state.vector_store.search, query, n_results)
+
         debug_results = []
         for i, result in enumerate(results):
             debug_info = {
@@ -123,28 +137,30 @@ async def debug_search(query: str, n_results: int = 3):
                 'text_preview': result['text'][:500] + '...' if len(result['text']) > 500 else result['text'],
                 'text_length': len(result['text'])
             }
-            
+
             # Add score breakdown if available
             if 'dense_score' in result:
                 debug_info['dense_score'] = result['dense_score']
             if 'sparse_score' in result:
                 debug_info['sparse_score'] = result['sparse_score']
-            
+
             debug_results.append(debug_info)
-        
+
         return {
             'query': query,
             'results_count': len(results),
             'chunks': debug_results
         }
     except Exception as e:
+        logger.exception("Debug search failed")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/debug/document/{doc_id}")
-async def debug_document(doc_id: int):
+async def debug_document(doc_id: int, req: Request):
     """Check document content from Paperless"""
     try:
-        doc = paperless_client.get_document(doc_id)
+        doc = await asyncio.to_thread(req.app.state.paperless_client.get_document, doc_id)
         return {
             'id': doc['id'],
             'title': doc.get('title', 'Untitled'),
@@ -155,44 +171,55 @@ async def debug_document(doc_id: int):
             'tags': doc.get('tags', [])
         }
     except Exception as e:
+        logger.exception("Failed to fetch document")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/reindex")
-async def reindex_documents():
+async def reindex_documents(background_tasks: BackgroundTasks, req: Request):
     """Trigger re-indexing of all documents"""
     from src.indexer import DocumentIndexer
     try:
-        indexer = DocumentIndexer()
-        indexer.index_all_documents(clear_existing=True)
-        info = vector_store.get_collection_info()
+        # Run indexing in background to avoid blocking API
+        def run_indexer():
+            indexer = DocumentIndexer()
+            indexer.index_all_documents(clear_existing=True)
+
+        background_tasks.add_task(run_indexer)
+
+        info = await asyncio.to_thread(req.app.state.vector_store.get_collection_info)
         return {
-            "status": "Reindexing complete",
+            "status": "Reindexing started",
             "collection": info
         }
     except Exception as e:
+        logger.exception("Failed to start reindexing")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/webhook/document-added")
-async def webhook_document_added(document_id: int):
+async def webhook_document_added(document_id: int, req: Request):
     """Handle new document webhook from Paperless"""
     from src.rag.chunker import DocumentChunker
-    
+
     try:
-        doc = paperless_client.get_document(document_id)
+        doc = await asyncio.to_thread(req.app.state.paperless_client.get_document, document_id)
         if not doc.get('content'):
             return {"status": "skipped", "reason": "No content"}
-        
+
         chunker = DocumentChunker()
-        chunks = chunker.chunk_document(doc)
-        vector_store.add_chunks(chunks)
-        
+        chunks = await asyncio.to_thread(chunker.chunk_document, doc)
+        await asyncio.to_thread(req.app.state.vector_store.add_chunks, chunks)
+
         return {
             "status": "indexed",
             "document_id": document_id,
             "chunks_added": len(chunks)
         }
     except Exception as e:
+        logger.exception("Failed to index webhook document")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn

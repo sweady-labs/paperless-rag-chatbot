@@ -1,14 +1,12 @@
 import requests
 from typing import List, Dict, Optional
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
+from src.config import settings
 
 class PaperlessClient:
     def __init__(self):
-        self.base_url = os.getenv('PAPERLESS_URL')
-        self.token = os.getenv('PAPERLESS_TOKEN')
+        self.base_url = settings.PAPERLESS_URL
+        self.token = settings.PAPERLESS_TOKEN
         self.headers = {'Authorization': f'Token {self.token}'}
     
     def get_document_url(self, doc_id: int) -> str:

@@ -3,10 +3,7 @@ Re-ranker for improving retrieval precision using cross-encoder models.
 Uses BGE reranker models as recommended by BGE-M3 documentation.
 """
 from typing import List, Dict
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
+from src.config import settings
 
 # Try to use BGE reranker for best performance
 try:
@@ -33,20 +30,22 @@ class Reranker:
         
         if self.use_bge_reranker:
             # Use BGE reranker (recommended)
-            reranker_model = os.getenv('BGE_RERANKER_MODEL', 'BAAI/bge-reranker-v2-m3')
-            print(f"🚀 Loading BGE reranker: {reranker_model}")
+            reranker_model = settings.BGE_RERANKER_MODEL
+            logger = __import__('logging').getLogger(__name__)
+            logger.info(f"Loading BGE reranker: {reranker_model}")
             self.reranker = FlagReranker(
                 reranker_model,
                 use_fp16=True,  # Faster on Mac M-series
                 device='cpu'
             )
-            print("✅ BGE reranker loaded successfully!")
+            logger.info("BGE reranker loaded successfully!")
         else:
             # Fallback to LLM-based reranking
-            print("⚠️  FlagEmbedding not available, using LLM-based reranking")
+            logger = __import__('logging').getLogger(__name__)
+            logger.warning("FlagEmbedding not available, using LLM-based reranking")
             self.llm = Ollama(
-                model=os.getenv('OLLAMA_MODEL', 'mistral:7b-instruct'),
-                base_url=os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434'),
+                model=settings.OLLAMA_MODEL,
+                base_url=settings.OLLAMA_BASE_URL,
                 temperature=0.0  # Deterministic for ranking
             )
     

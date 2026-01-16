@@ -2,9 +2,7 @@ from typing import List, Dict
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import tiktoken
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
+from src.config import settings
 
 class DocumentChunker:
     """
@@ -19,9 +17,9 @@ class DocumentChunker:
     def __init__(self, chunk_size: int = None, chunk_overlap: int = None, max_chunk_size: int = 8000):
         # Load from environment or use BGE-M3 optimized defaults
         if chunk_size is None:
-            chunk_size = int(os.getenv('CHUNK_SIZE', '1000'))  # Optimal for BGE-M3
+            chunk_size = settings.CHUNK_SIZE  # Optimal for BGE-M3
         if chunk_overlap is None:
-            chunk_overlap = int(os.getenv('CHUNK_OVERLAP', '200'))  # 20% overlap recommended
+            chunk_overlap = settings.CHUNK_OVERLAP  # 20% overlap recommended
             
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
@@ -34,7 +32,7 @@ class DocumentChunker:
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             length_function=lambda text: len(self.encoding.encode(text)),
-            separators=["\n\n", "\n", ". ", " ", ""]
+            separators=["\n\n", "\n", ". ", " "]
         )
         
         print(f"📝 Chunker initialized: size={chunk_size}, overlap={chunk_overlap}, max={max_chunk_size}")
@@ -69,7 +67,7 @@ class DocumentChunker:
                 continue  # Skip chunks that are too large
             
             # Generate Paperless document URL
-            paperless_url = os.getenv('PAPERLESS_URL', 'http://localhost:8000')
+            paperless_url = settings.PAPERLESS_URL
             doc_url = f"{paperless_url}/documents/{document['id']}"
             
             chunked_docs.append({
