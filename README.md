@@ -1,3 +1,8 @@
+# paperless-rag-chatbot
+
+Small, local RAG chatbot for querying documents stored in Paperless‑NGX.
+
+This project combines document chunking, BGE‑M3 embeddings, a Qdrant vector store and a local LLM via Ollama. It's designed to be small, practical and easy to run locally.
 # Paperless RAG Chatbot
 
 AI-powered chatbot for querying documents in Paperless-NGX using RAG (Retrieval-Augmented Generation) with **BGE-M3 hybrid search**.
@@ -344,8 +349,56 @@ MIT
 - [Qdrant](https://qdrant.tech/) - Vector database
 - [LangChain](https://python.langchain.com/) - RAG framework
 
-## Support
+## Quick start
 
-- Paperless-NGX Docs: https://docs.paperless-ngx.com/
+1. Clone and install dependencies:
+
+```bash
+git clone <repo>
+cd paperless-rag-chatbot
+make setup
+```
+
+2. Configure:
+
+```bash
+cp .env.example .env
+# Edit .env and set PAPERLESS_URL and PAPERLESS_TOKEN
+```
+
+3. (Optional) download recommended models:
+
+```bash
+make setup-models
+```
+
+4. Index documents:
+
+```bash
+make index
+```
+
+5. Start services:
+
+```bash
+make serve-all
+# web UI: http://localhost:7860
+# API docs: http://localhost:8001/docs
+```
+
+Where to look next
+- `.env.example` — runtime defaults
+- `Makefile` — main commands (`setup`, `index`, `serve-all`)
+- `src/indexer.py` — indexing logic
+- `src/api/server.py` — REST API
+
+Troubleshooting (short)
+- Ollama: `ollama serve` and check `http://localhost:11434/api/tags`
+- Paperless: verify `PAPERLESS_URL` and `PAPERLESS_TOKEN`
+- GPU on macOS: `python -c "import torch; print(torch.backends.mps.is_available())"`
+
+License: MIT
+
+Links
+- Paperless‑NGX: https://github.com/paperless-ngx/paperless-ngx
 - Ollama: https://ollama.ai/
-- BGE-M3: https://github.com/FlagOpen/FlagEmbedding
