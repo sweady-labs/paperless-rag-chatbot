@@ -1,46 +1,66 @@
-from typing import List, Dict
+"""
+Document chunker optimized for fast RAG.
+
+Uses smaller chunks for faster LLM processing.
+"""
+
+from typing import List, Dict, Optional
+import logging
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import tiktoken
-import os
+
 from src.config import settings
+
+logger = logging.getLogger(__name__)
+
 
 class DocumentChunker:
     """
-    Document chunker optimized for BGE-M3 model.
+    Document chunker for fast RAG pipeline.
     
-    BGE-M3 supports up to 8192 tokens, but for optimal performance:
-    - Use 1000-2000 tokens per chunk for general documents
-    - Use larger chunks (up to 4000) for long documents with context
-    - Increase overlap to preserve context across chunks
+    Uses smaller chunks (512 tokens) for:
+    - Faster LLM processing (less context)
+    - More precise retrieval
+    - Better cache efficiency
     """
     
-    def __init__(self, chunk_size: int = None, chunk_overlap: int = None, max_chunk_size: int = 8000):
-        # Load from environment or use BGE-M3 optimized defaults
-        if chunk_size is None:
-            chunk_size = settings.CHUNK_SIZE  # Optimal for BGE-M3
-        if chunk_overlap is None:
-            chunk_overlap = settings.CHUNK_OVERLAP  # 20% overlap recommended
-            
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
-        self.max_chunk_size = max_chunk_size  # BGE-M3 max is 8192
+    def __init__(
+        self, 
+        chunk_size: Optional[int] = None, 
+        chunk_overlap: Optional[int] = None, 
+        max_chunk_size: Optional[int] = None
+    ):
+        """
+        Initialize the chunker.
+        
+        Args:
+            chunk_size: Tokens per chunk (default from settings)
+            chunk_overlap: Overlap between chunks (default from settings)
+            max_chunk_size: Maximum allowed chunk size (default from settings)
+        """
+        self.chunk_size = chunk_size or settings.CHUNK_SIZE
+        self.chunk_overlap = chunk_overlap or settings.CHUNK_OVERLAP
+        self.max_chunk_size = max_chunk_size or settings.MAX_CHUNK_SIZE
         
         # Use tiktoken for accurate token counting
         self.encoding = tiktoken.get_encoding("cl100k_base")
         
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap,
             length_function=lambda text: len(self.encoding.encode(text)),
             separators=["\n\n", "\n", ". ", " "]
         )
         
-        print(f"📝 Chunker initialized: size={chunk_size}, overlap={chunk_overlap}, max={max_chunk_size}")
+        logger.info(
+            f"Chunker: size={self.chunk_size}, overlap={self.chunk_overlap}, "
+            f"max={self.max_chunk_size}"
+        )
     
     def chunk_document(self, document: Dict) -> List[Dict]:
         """
         Chunk a Paperless document into smaller pieces with metadata.
-        Optimized for BGE-M3's 8K token context window.
         
         Args:
             document: Paperless document dict with 'content', 'title', etc.
@@ -50,25 +70,27 @@ class DocumentChunker:
         """
         content = document.get('content', '')
         
+        if not content:
+            return []
+        
         # Split into chunks
         chunks = self.text_splitter.split_text(content)
         
-        # Add metadata to each chunk, filtering out oversized chunks
+        # Add metadata to each chunk
         chunked_docs = []
         skipped_chunks = 0
         
+        # Generate Paperless document URL
+        paperless_url = settings.PAPERLESS_URL
+        doc_url = f"{paperless_url}/documents/{document['id']}"
+        
         for i, chunk in enumerate(chunks):
-            # Check chunk size to avoid embedding API errors
+            # Check chunk size
             chunk_tokens = len(self.encoding.encode(chunk))
             
             if chunk_tokens > self.max_chunk_size:
-                # BGE-M3 supports up to 8192, but we cap at 8000 for safety
                 skipped_chunks += 1
-                continue  # Skip chunks that are too large
-            
-            # Generate Paperless document URL
-            paperless_url = settings.PAPERLESS_URL
-            doc_url = f"{paperless_url}/documents/{document['id']}"
+                continue
             
             chunked_docs.append({
                 'text': chunk,
@@ -82,12 +104,13 @@ class DocumentChunker:
                     'chunk_index': i,
                     'total_chunks': len(chunks),
                     'source': 'paperless-ngx',
-                    'url': doc_url  # Direct link to document in Paperless
+                    'url': doc_url
                 }
             })
         
         if skipped_chunks > 0:
-            import logging
-            logging.warning(f"Skipped {skipped_chunks} oversized chunks from document {document['id']}")
+            logger.warning(
+                f"Skipped {skipped_chunks} oversized chunks from document {document['id']}"
+            )
         
         return chunked_docs

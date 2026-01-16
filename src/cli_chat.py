@@ -1,90 +1,99 @@
 #!/usr/bin/env python3
 """
-Simple CLI interface for the Paperless RAG Chatbot
+Fast CLI interface for the Paperless RAG Chatbot.
 """
 import requests
-import json
 import sys
+import time
 
 API_URL = "http://localhost:8001"
 
+
 def chat():
-    """Interactive chat loop"""
-    print("=" * 60)
-    print("Paperless RAG Chatbot - Type 'exit' or 'quit' to stop")
-    print("=" * 60)
+    """Interactive chat loop."""
+    print("=" * 50)
+    print("Paperless RAG Chatbot (Fast Mode)")
+    print("Type 'exit' or 'quit' to stop")
+    print("=" * 50)
     print()
     
-    # Check if server is running
+    # Check server health
     try:
-        health = requests.get(f"{API_URL}/health", timeout=2)
-        health_data = health.json()
-        if health_data.get('status') == 'healthy':
-            collection_info = health_data.get('collection', {})
-            print(f"✓ Connected to server")
-            print(f"✓ Indexed chunks: {collection_info.get('points_count', 'unknown')}")
+        health = requests.get(f"{API_URL}/health", timeout=5)
+        data = health.json()
+        
+        if data.get('status') == 'healthy':
+            collection = data.get('collection', {})
+            config = data.get('config', {})
+            print(f"Connected to server")
+            print(f"  Chunks: {collection.get('points_count', 0)}")
+            print(f"  LLM: {config.get('llm_model', 'unknown')}")
             print()
         else:
-            print("⚠ Server is running but vector store might not be ready")
+            print("Server running but may have issues")
             print()
+            
     except requests.exceptions.RequestException:
-        print("✗ Error: Cannot connect to server at", API_URL)
-        print("  Make sure the server is running: python src/api/server.py")
+        print(f"Cannot connect to server at {API_URL}")
+        print("Run: make serve-api")
         sys.exit(1)
     
     while True:
         try:
-            question = input("\n🧑 You: ").strip()
+            question = input("\nYou: ").strip()
             
             if not question:
                 continue
             
             if question.lower() in ['exit', 'quit', 'q']:
-                print("\nGoodbye! 👋")
+                print("\nGoodbye!")
                 break
             
-            # Show thinking indicator
-            print("\n🤖 Assistant: Searching documents...", end='', flush=True)
+            # Query with timing
+            start = time.time()
+            print("\nSearching...", end='', flush=True)
             
-            # Query the API
             response = requests.post(
                 f"{API_URL}/query",
-                json={"question": question, "n_results": 5},
-                timeout=60
+                json={"question": question, "n_results": 3},
+                timeout=30
             )
             
-            # Clear the thinking indicator
-            print("\r" + " " * 50 + "\r", end='')
+            latency = time.time() - start
+            print("\r" + " " * 20 + "\r", end='')
             
             if response.status_code == 200:
                 result = response.json()
                 
                 # Print answer
-                print(f"🤖 Assistant: {result['answer']}\n")
+                print(f"Assistant: {result['answer']}")
                 
                 # Print sources
                 if result['sources']:
-                    print("📚 Sources:")
+                    print("\nSources:")
                     for i, source in enumerate(result['sources'][:3], 1):
-                        score_percent = source['score'] * 100
-                        # Include URL if available
-                        if 'url' in source and source['url']:
-                            print(f"  {i}. {source['title']} (relevance: {score_percent:.1f}%)")
-                            print(f"     → {source['url']}")
-                        else:
-                            print(f"  {i}. {source['title']} (relevance: {score_percent:.1f}%)")
-                else:
-                    print("📚 No sources found")
+                        score = source.get('score', 0) * 100
+                        title = source.get('title', 'Unknown')
+                        url = source.get('url', '')
+                        
+                        print(f"  {i}. {title} ({score:.0f}%)")
+                        if url:
+                            print(f"     {url}")
+                
+                # Show timing
+                server_ms = result.get('latency_ms', 0)
+                print(f"\n[{latency:.1f}s total, {server_ms}ms server]")
             else:
-                print(f"✗ Error: {response.status_code} - {response.text}")
+                print(f"Error: {response.status_code} - {response.text}")
         
         except KeyboardInterrupt:
-            print("\n\nGoodbye! 👋")
+            print("\n\nGoodbye!")
             break
         except requests.exceptions.Timeout:
-            print("\r✗ Request timed out. Try asking a simpler question.")
+            print("\rTimeout. Check if Ollama is running.")
         except Exception as e:
-            print(f"\r✗ Error: {e}")
+            print(f"\rError: {e}")
+
 
 if __name__ == "__main__":
     chat()

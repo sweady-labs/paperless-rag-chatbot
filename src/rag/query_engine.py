@@ -5,7 +5,7 @@ from src.config import settings
 from .reranker import Reranker
 
 class QueryEngine:
-    def __init__(self, vector_store, use_reranker: bool = True):
+    def __init__(self, vector_store, use_reranker: bool = False):
         """Optimized query engine with better German support and performance."""
         self.vector_store = vector_store
         self.use_reranker = use_reranker
@@ -18,11 +18,13 @@ class QueryEngine:
         self.llm = Ollama(
             model=model,
             base_url=settings.OLLAMA_BASE_URL,
-            temperature=0.1,
-            num_predict=512,  # Limit response length for faster generation
-            timeout=90,  # 90 second timeout for LLM calls
-            # Enforce German/English responses
-            system="You are a helpful assistant. Always respond in the same language as the question. Never use Chinese characters."
+            temperature=0.0,
+            num_predict=256,  # Increased back to 256 for complete answers
+            timeout=60,  # 60s is enough with faster llama3.2:3b model
+            top_k=10,
+            top_p=0.9,
+            # Stronger system prompt
+            system="You are a document assistant. You MUST answer ONLY based on the provided context. Never make up information. If the context doesn't contain the answer, say so clearly."
         )
         
         # Initialize reranker
@@ -40,32 +42,32 @@ class QueryEngine:
         # Optimized RAG prompt template - clearer instructions
         self.prompt_template = PromptTemplate(
             input_variables=["context", "question"],
-            template="""Du bist ein hilfreicher Assistent, der Fragen basierend auf Dokumenten aus einem Paperless-NGX System beantwortet.
+            template="""Du bist ein Assistent, der Fragen NUR basierend auf den bereitgestellten Dokumenten beantwortet.
 
-Nutze den folgenden Kontext aus relevanten Dokumenten um die Frage zu beantworten. Wenn die Antwort nicht im Kontext zu finden ist, sage das klar und deutlich.
+=== WICHTIGE REGELN ===
+1. Beantworte die Frage NUR mit Informationen aus dem unten stehenden Kontext
+2. Wenn die Antwort NICHT im Kontext steht, sage: "Diese Information ist in den Dokumenten nicht vorhanden."
+3. Erfinde NIEMALS Informationen - nutze NUR was im Kontext steht
+4. Antworte in der gleichen Sprache wie die Frage
+5. Zitiere direkt aus den Dokumenten wenn möglich
 
-WICHTIG: 
-- Antworte in der gleichen Sprache wie die Frage gestellt wurde. Nutze NIE chinesische Zeichen.
-- Wenn nach ALLEN Dokumenten, einer ÜBERSICHT oder TABELLE gefragt wird, analysiere JEDEN einzelnen Kontext-Block
-- Extrahiere die relevanten Daten aus JEDEM Dokument und präsentiere sie in tabellarischer oder Listenform
-- Bei Gehaltsabrechnungen: Zeige Monat, Dokument-Titel und den konkreten Betrag für jeden Eintrag
-- Summiere am Ende die Gesamtsumme
-
-Kontext aus Dokumenten:
+=== KONTEXT AUS DOKUMENTEN ===
 {context}
 
-Frage: {question}
+=== FRAGE ===
+{question}
 
-Antwort:"""
+=== ANTWORT (NUR BASIEREND AUF DEM KONTEXT OBEN) ===
+"""
         )
     
-    def query(self, question: str, n_results: int = 5, fast_rerank: bool = True) -> Dict:
+    def query(self, question: str, n_results: int = 1, fast_rerank: bool = True) -> Dict:
         """
         Answer a question using optimized RAG pipeline.
         
         Args:
             question: User question
-            n_results: Number of final results (default: 5 for faster responses)
+            n_results: Number of final results (default: 1 for maximum speed)
             fast_rerank: Use fast reranking (recommended)
             
         Returns:
@@ -82,11 +84,11 @@ Antwort:"""
         
         # 1. Retrieve with BGE-M3 hybrid search
         if is_analytical:
-            # For analytical queries: retrieve MORE documents (up to 60)
-            initial_k = min(n_results * 4, 60) if self.use_reranker else min(n_results * 3, 50)
+            # For analytical queries: retrieve MORE documents (up to 40)
+            initial_k = min(n_results * 4, 40) if self.use_reranker else min(n_results * 3, 30)
         else:
-            # Standard queries: moderate amount
-            initial_k = min(n_results * 2, 20) if self.use_reranker else n_results
+            # Standard queries: keep it minimal for speed
+            initial_k = min(n_results * 2, 10) if self.use_reranker else n_results
         
         if self.is_hybrid:
             results = self.vector_store.search(question, n_results=initial_k, metadata_filter=metadata_filter)
@@ -150,13 +152,27 @@ Antwort:"""
         )
         
         try:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Calling LLM with model: {settings.OLLAMA_MODEL}")
+            logger.debug(f"Prompt length: {len(prompt)} chars")
+            
             answer = self.llm.invoke(prompt)
+            
             # Ensure proper encoding
             if isinstance(answer, str):
                 answer = answer.encode('utf-8', errors='ignore').decode('utf-8')
+                
+            logger.info(f"LLM response received: {len(answer)} chars")
         except Exception as e:
+            import logging
+            import traceback
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error generating answer: {e}")
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
             print(f"❌ Error generating answer: {e}")
-            answer = "Es gab einen Fehler bei der Generierung der Antwort."
+            print(f"Full error:\n{traceback.format_exc()}")
+            answer = f"Es gab einen Fehler bei der Generierung der Antwort: {str(e)}"
         
         return {
             'answer': answer,

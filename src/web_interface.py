@@ -1,28 +1,38 @@
 #!/usr/bin/env python3
 """
-Web interface for the Paperless RAG Chatbot using Gradio
+Fast Web interface for the Paperless RAG Chatbot using Gradio.
+
+Optimized for sub-2-second responses on Apple Silicon.
 """
 import gradio as gr
 import requests
-import sys
+import time
 
 API_URL = "http://localhost:8001"
 
+
 def query_chatbot(message, history):
-    """Query the RAG chatbot"""
+    """Query the fast RAG chatbot."""
     try:
-        # Auto-detect analytical queries and increase n_results
-        analytical_keywords = ['alle', 'gesamt', 'pro monat', 'übersicht', 'tabelle', 'liste', 'jeden monat', 
-                              'all', 'total', 'overview', 'table', 'list', 'per month', 'each month']
-        is_analytical = any(keyword in message.lower() for keyword in analytical_keywords)
+        start_time = time.time()
         
-        n_results = 20 if is_analytical else 10  # More results for analytical queries
+        # Detect analytical queries for more context
+        analytical_keywords = [
+            'alle', 'gesamt', 'übersicht', 'tabelle', 'liste',
+            'all', 'total', 'overview', 'table', 'list'
+        ]
+        is_analytical = any(kw in message.lower() for kw in analytical_keywords)
+        
+        # Fewer results for speed (3 default, 6 for analytical)
+        n_results = 6 if is_analytical else 3
         
         response = requests.post(
             f"{API_URL}/query",
             json={"question": message, "n_results": n_results},
-            timeout=120  # Increased for complex LLM queries
+            timeout=30  # 30s is enough for fast mode
         )
+        
+        latency = time.time() - start_time
         
         if response.status_code == 200:
             result = response.json()
@@ -30,77 +40,101 @@ def query_chatbot(message, history):
             
             # Add sources with clickable links
             if result['sources']:
-                sources_text = "\n\n**📚 Sources:**\n"
+                sources_text = "\n\n**Sources:**\n"
                 for i, source in enumerate(result['sources'][:3], 1):
-                    # Handle both score formats (simple and hybrid)
-                    if 'score' in source:
-                        score_percent = source['score'] * 100
-                    elif 'hybrid_score' in source:
-                        score_percent = source['hybrid_score'] * 100
-                    else:
-                        score_percent = 0
+                    score = source.get('score', 0) * 100
+                    title = source.get('title', 'Unknown')
+                    url = source.get('url', '')
                     
-                    # Add URL if available - Gradio ChatInterface needs explicit URLs
-                    if 'url' in source and source['url']:
-                        sources_text += f"{i}. **{source['title']}** (relevance: {score_percent:.1f}%)\n"
-                        sources_text += f"   🔗 {source['url']}\n"
+                    if url:
+                        sources_text += f"{i}. **{title}** ({score:.0f}%)\n   {url}\n"
                     else:
-                        sources_text += f"{i}. {source['title']} (relevance: {score_percent:.1f}%)\n"
+                        sources_text += f"{i}. {title} ({score:.0f}%)\n"
+                
                 answer += sources_text
+            
+            # Add latency info
+            server_latency = result.get('latency_ms', 0)
+            answer += f"\n\n*Response time: {latency:.1f}s (server: {server_latency}ms)*"
             
             return answer
         else:
             return f"Error: {response.status_code} - {response.text}"
     
     except requests.exceptions.Timeout:
-        return "⏱️ Request timed out (2 min). Try a simpler question or check if Ollama is running."
+        return "Request timed out. Check if Ollama and the API server are running."
+    except requests.exceptions.ConnectionError:
+        return "Cannot connect to API server. Run 'make serve-api' first."
     except Exception as e:
-        return f"❌ Error: {str(e)}"
+        return f"Error: {str(e)}"
+
 
 def check_health():
-    """Check server health"""
+    """Check server health."""
     try:
-        response = requests.get(f"{API_URL}/health", timeout=2)
+        response = requests.get(f"{API_URL}/health", timeout=5)
         if response.status_code == 200:
             data = response.json()
             collection = data.get('collection', {})
-            return f"✅ Server is healthy\n📊 Indexed chunks: {collection.get('points_count', 'unknown')}"
+            config = data.get('config', {})
+            
+            return (
+                f"Status: Healthy\n"
+                f"Chunks: {collection.get('points_count', 0)}\n"
+                f"LLM: {config.get('llm_model', 'unknown')}\n"
+                f"Embeddings: {config.get('embedding_model', 'unknown')}"
+            )
         else:
-            return "⚠️ Server is running but might have issues"
-    except:
-        return "❌ Cannot connect to server"
+            return "Server has issues"
+    except requests.exceptions.ConnectionError:
+        return "Server not running.\nRun: make serve-api"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
 
 # Create Gradio interface
 with gr.Blocks(title="Paperless RAG Chatbot") as demo:
-    gr.Markdown("# 📄 Paperless RAG Chatbot")
-    gr.Markdown("Ask questions about your documents in Paperless-NGX")
+    gr.Markdown("# Paperless RAG Chatbot (Fast Mode)")
+    gr.Markdown("Ask questions about your Paperless-NGX documents. Responses in ~1-2 seconds.")
     
     with gr.Row():
         with gr.Column(scale=3):
             chatbot = gr.ChatInterface(
                 query_chatbot,
                 examples=[
-                    "Was habe ich 2024 an Steuern gezahlt?",
-                    "Liste alle Gehaltsabrechnungen 2017 mit Lohnsteuer auf",
-                    "Erstelle eine Tabelle aller Rechnungen aus 2024",
-                    "Zeige mir eine Übersicht meiner monatlichen Zahlungen 2017",
-                    "Find all contracts related to insurance",
-                    "What documents mention payments?"
+                    "Was steht in meiner letzten Rechnung?",
+                    "Find all documents from Amazon",
+                    "Zeige mir Dokumente aus 2024",
+                    "What payments did I make this year?",
+                    "Liste alle Verträge auf"
                 ]
             )
         
         with gr.Column(scale=1):
-            gr.Markdown("### System Status")
-            health_output = gr.Textbox(label="Health Check", interactive=False)
-            health_btn = gr.Button("🔄 Check Status")
+            gr.Markdown("### Status")
+            health_output = gr.Textbox(
+                label="Server Health",
+                interactive=False,
+                lines=4
+            )
+            health_btn = gr.Button("Refresh")
             health_btn.click(check_health, outputs=health_output)
-            
-            # Show initial health on load
             demo.load(check_health, outputs=health_output)
+            
+            gr.Markdown("---")
+            gr.Markdown("### Quick Links")
+            gr.Markdown("[API Docs](http://localhost:8001/docs)")
+            gr.Markdown("[Debug Search](http://localhost:8001/debug/search/test)")
+
 
 if __name__ == "__main__":
-    print("Starting Gradio web interface...")
-    print(f"Make sure the API server is running at {API_URL}")
+    print("=" * 50)
+    print("Paperless RAG Chatbot - Fast Web Interface")
+    print("=" * 50)
+    print(f"API Server: {API_URL}")
+    print("Make sure the API is running: make serve-api")
+    print()
+    
     demo.launch(
         server_name="0.0.0.0",
         server_port=7860,

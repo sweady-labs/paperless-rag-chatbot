@@ -119,7 +119,7 @@ class HybridVectorStore:
                 logger.info(f"Created collection: {self.collection_name} (dense only)")
 
     def add_chunks(self, chunks: List[Dict]):
-        """Add chunks with BGE-M3 embeddings."""
+        """Add chunks with BGE-M3 embeddings (memory-optimized)."""
         if not chunks:
             return
 
@@ -129,16 +129,38 @@ class HybridVectorStore:
         logger.info(f"Encoding {len(texts)} chunks...")
 
         if self.use_full_bge_m3:
-            # Encode mit allen drei Modi
-            # Larger batch size for faster CPU processing (32 for indexing, smaller for queries)
-            embeddings = self.model.encode(
-                texts,
-                batch_size=32,
-                max_length=settings.BGE_M3_MAX_LENGTH,
-                return_dense=True,
-                return_sparse=True,
-                return_colbert_vecs=True
-            )
+            # Memory optimization: adjust batch size based on number of chunks
+            batch_size = settings.BGE_M3_BATCH_SIZE
+            if len(texts) > 30:
+                batch_size = max(4, batch_size // 2)  # Halve batch size for large documents
+                logger.info(f"Large document detected ({len(texts)} chunks), using smaller batch size: {batch_size}")
+            
+            try:
+                # Encode mit allen drei Modi
+                embeddings = self.model.encode(
+                    texts,
+                    batch_size=batch_size,
+                    max_length=settings.BGE_M3_MAX_LENGTH,
+                    return_dense=True,
+                    return_sparse=True,
+                    return_colbert_vecs=True
+                )
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower() or "mps" in str(e).lower():
+                    logger.warning(f"GPU out of memory, retrying with batch_size=1 and clearing cache...")
+                    self._clear_gpu_cache()
+                    
+                    # Retry with minimal batch size
+                    embeddings = self.model.encode(
+                        texts,
+                        batch_size=1,
+                        max_length=settings.BGE_M3_MAX_LENGTH,
+                        return_dense=True,
+                        return_sparse=True,
+                        return_colbert_vecs=True
+                    )
+                else:
+                    raise
 
             dense_vecs = embeddings['dense_vecs']
             sparse_vecs = embeddings['lexical_weights']
@@ -362,3 +384,18 @@ class HybridVectorStore:
             'points_count': info.points_count,
             'type': 'hybrid (dense+sparse+colbert)' if self.use_full_bge_m3 else 'dense only'
         }
+    
+    def _clear_gpu_cache(self):
+        """Clear GPU cache to free memory."""
+        try:
+            import torch
+            if torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+                logger.info("Cleared MPS cache")
+            elif torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                logger.info("Cleared CUDA cache")
+            import gc
+            gc.collect()
+        except Exception as e:
+            logger.debug(f"Could not clear GPU cache: {e}")
