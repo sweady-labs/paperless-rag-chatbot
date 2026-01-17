@@ -5,7 +5,7 @@ Key optimizations:
 - Uses qwen2.5:3b for fast inference (~35-50 tok/s on M5)
 - Smaller context window (2048 tokens)
 - Shorter max output (200 tokens)
-- No reranking overhead
+- Hybrid search (dense vector + sparse BM25) for better recall
 - Optional streaming for perceived speed
 
 Author: Optimized for M5 GPU
@@ -19,6 +19,7 @@ from langchain_community.llms import Ollama
 from langchain_core.prompts import PromptTemplate
 
 from src.config import settings
+from src.rag.hybrid_retriever import HybridRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -28,16 +29,33 @@ class FastQueryEngine:
     Optimized query engine for fast RAG responses.
     
     Designed for sub-2-second end-to-end latency on Apple Silicon.
+    Now with hybrid search (vector + BM25) for better quality.
     """
     
-    def __init__(self, vector_store):
+    def __init__(self, vector_store, use_hybrid: bool = None):
         """
         Initialize the fast query engine.
         
         Args:
             vector_store: FastVectorStore instance for retrieval
+            use_hybrid: Use hybrid search (vector + BM25) instead of pure vector.
+                       If None, reads from settings.USE_HYBRID_SEARCH
         """
         self.vector_store = vector_store
+        
+        # Use settings if not explicitly specified
+        if use_hybrid is None:
+            use_hybrid = settings.USE_HYBRID_SEARCH
+        
+        self.use_hybrid = use_hybrid
+        
+        # Initialize hybrid retriever if enabled
+        if use_hybrid:
+            logger.info("Initializing hybrid retriever (vector + BM25)...")
+            self.retriever = HybridRetriever(vector_store)
+            logger.info("Hybrid retriever ready")
+        else:
+            self.retriever = None
         
         # Initialize Ollama LLM with optimized settings
         model = settings.OLLAMA_MODEL
@@ -111,13 +129,14 @@ ANTWORT:"""
         
         return filter_dict if filter_dict else None
     
-    def query(self, question: str, n_results: int = None) -> Dict:
+    def query(self, question: str, n_results: int = None, min_score: float = 0.60) -> Dict:
         """
         Answer a question using fast RAG pipeline.
         
         Args:
             question: User question
             n_results: Number of chunks to retrieve (default from settings)
+            min_score: Minimum similarity score to include (default: 0.55)
             
         Returns:
             Dict with 'answer', 'sources', 'context', 'method'
@@ -137,12 +156,27 @@ ANTWORT:"""
         # Extract metadata filter
         metadata_filter = self._extract_metadata_filter(question)
         
-        # 1. Retrieve relevant chunks
-        results = self.vector_store.search(
-            question, 
-            n_results=n_results,
-            metadata_filter=metadata_filter
-        )
+        # 1. Retrieve relevant chunks (hybrid or vector-only)
+        if self.use_hybrid and self.retriever:
+            # Hybrid search (vector + BM25) with configured weights
+            results = self.retriever.search(
+                question,
+                n_results=n_results,
+                dense_weight=settings.HYBRID_DENSE_WEIGHT,
+                sparse_weight=settings.HYBRID_SPARSE_WEIGHT,
+                metadata_filter=metadata_filter
+            )
+        else:
+            # Pure vector search (fallback)
+            results = self.vector_store.search(
+                question, 
+                n_results=n_results,
+                metadata_filter=metadata_filter
+            )
+        
+        # Filter by minimum score
+        if min_score > 0:
+            results = [r for r in results if r.get('score', 0) >= min_score]
         
         if not results:
             return {
@@ -163,7 +197,9 @@ ANTWORT:"""
                 'title': metadata['title'],
                 'chunk': f"{metadata['chunk_index'] + 1}/{metadata['total_chunks']}",
                 'url': metadata.get('url', ''),
-                'score': round(result.get('score', 0), 4)
+                'score': round(result.get('score', 0), 4),
+                'dense_score': round(result.get('dense_score', 0), 4),
+                'bm25_score': round(result.get('bm25_score', 0), 4)
             })
             context_parts.append(
                 f"[{metadata['title']}]\n{result['text']}"

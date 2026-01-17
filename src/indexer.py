@@ -21,6 +21,62 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def is_garbage_text(text: str, threshold: float = 0.5) -> bool:
+    """
+    Detect if text is mostly garbage (OCR failures, control characters, cipher-like text).
+    
+    Args:
+        text: Text to check
+        threshold: Ratio of garbage chars to total (default 0.5 = 50%)
+    
+    Returns:
+        True if text is garbage, False if it's readable
+    """
+    if not text or len(text) < 10:
+        return True
+    
+    # 1. Count printable vs non-printable characters
+    garbage_chars = 0
+    total_chars = len(text)
+    
+    for char in text:
+        # Control characters (0x00-0x1F except common whitespace)
+        if ord(char) < 32 and char not in '\n\r\t':
+            garbage_chars += 1
+        # High control characters (mostly garbage from OCR)
+        elif ord(char) > 127 and not char.isalpha():
+            garbage_chars += 0.5  # Partial penalty for non-ASCII non-letters
+    
+    garbage_ratio = garbage_chars / total_chars
+    
+    # 2. Check for minimum readable content
+    alpha_count = sum(1 for c in text if c.isalpha())
+    alpha_ratio = alpha_count / total_chars
+    
+    # 3. Check for cipher-like text (too many single-letter "words")
+    words = text.split()
+    if len(words) > 5:
+        single_letter_words = sum(1 for w in words if len(w) == 1 and w.isalpha())
+        single_letter_ratio = single_letter_words / len(words)
+        
+        # If >30% of words are single letters, it's likely garbage
+        if single_letter_ratio > 0.3:
+            return True
+    
+    # 4. Check average word length (cipher text has very short "words")
+    if len(words) > 5:
+        # Filter out single chars and get average word length
+        real_words = [w for w in words if len(w) > 1]
+        if real_words:
+            avg_word_len = sum(len(w) for w in real_words) / len(real_words)
+            # German/English avg word length is ~5-6 chars, cipher is often 2-3
+            if avg_word_len < 3:
+                return True
+    
+    # Garbage if: >50% garbage chars OR <10% letters
+    return garbage_ratio > threshold or alpha_ratio < 0.1
+
+
 class FastIndexer:
     """
     Fast document indexer using Ollama embeddings.
@@ -70,6 +126,7 @@ class FastIndexer:
         successful = 0
         failed = 0
         skipped_chunks = 0
+        garbage_chunks = 0
         
         for doc in tqdm(documents, desc="Embedding"):
             try:
@@ -90,6 +147,12 @@ class FastIndexer:
                 for chunk in chunks:
                     text = chunk['text']
                     metadata = chunk['metadata']
+                    
+                    # Skip garbage text (OCR failures)
+                    if is_garbage_text(text):
+                        garbage_chunks += 1
+                        logger.debug(f"Skipping garbage chunk in {metadata['title']}")
+                        continue
                     
                     # Embed single text
                     embedding = self.vector_store.embed_chunk(text)
@@ -114,6 +177,8 @@ class FastIndexer:
         logger.info(f"Embedding complete: {len(all_points)} points from {successful} documents")
         if skipped_chunks > 0:
             logger.warning(f"Skipped {skipped_chunks} chunks due to embedding errors")
+        if garbage_chunks > 0:
+            logger.warning(f"Skipped {garbage_chunks} garbage chunks (OCR failures)")
         
         if not all_points:
             logger.error("No points to index!")

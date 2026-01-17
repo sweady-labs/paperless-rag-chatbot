@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     TOP_K: int = Field(default=3)
     RERANK_ENABLED: bool = Field(default=False)
     RERANK_TOP_K: int = Field(default=10)
+    
+    # Hybrid Search (Vector + BM25)
+    USE_HYBRID_SEARCH: bool = Field(default=True)
+    HYBRID_DENSE_WEIGHT: float = Field(default=0.6)
+    HYBRID_SPARSE_WEIGHT: float = Field(default=0.4)
 
     # ==========================================================================
     # Performance
