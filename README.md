@@ -21,7 +21,7 @@ AI-powered document search for Paperless-NGX using local LLMs and vector embeddi
 │  │  Ollama (Native macOS)                                      │  │
 │  │  ├─ LLM: llama3.1:8b (20-30 tok/s)                          │  │
 │  │  ├─ Embeddings: bge-m3 (100-150ms)                          │  │ 
-│  │  └─ Metal GPU acceleration ⚡                               │  │
+│  │  └─ Metal GPU acceleration ⚡                                │  │
 │  │     Port: 11434                                             │  │
 │  └─────────────────────────────────────────────────────────────┘  │
 │                              ▲                                    │
