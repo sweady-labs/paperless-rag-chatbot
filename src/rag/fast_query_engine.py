@@ -86,7 +86,7 @@ class FastQueryEngine:
             temperature=settings.LLM_TEMPERATURE,
             num_predict=settings.LLM_MAX_TOKENS,
             num_ctx=settings.LLM_NUM_CTX,
-            timeout=30,  # 30s timeout is plenty for fast models
+            timeout=90,  # 90s timeout for longer responses (tables, explanations)
             top_k=10,
             top_p=0.9,
         )
@@ -109,17 +109,23 @@ QUESTION: {question}
 ANSWER:"""
         )
         
-        # German prompt for German queries - Strict but helpful
+        # German prompt for German queries - More extractive and helpful
         self.prompt_template_de = PromptTemplate(
             input_variables=["context", "question"],
-            template="""Du bist ein präziser Assistent für Dokumentensuche. Beantworte die Frage basierend auf den Dokumenten unten.
+            template="""Du bist ein hilfreicher Assistent für Dokumentensuche. Beantworte die Frage basierend auf den bereitgestellten Dokumenten.
 
-WICHTIGE REGELN:
-1. Nutze NUR Informationen aus den bereitgestellten Dokumenten
-2. Wenn ein Dokument NICHT zur Frage passt, ignoriere es
-3. Wenn die Antwort WIRKLICH nicht in den Dokumenten steht, sage: "Die Antwort ist in den Dokumenten nicht enthalten."
-4. Sei präzise und direkt - antworte in 1-3 Sätzen
-5. Extrahiere relevante Informationen auch aus OCR-Text mit Fehlern
+REGELN:
+1. Extrahiere relevante Informationen aus den Dokumenten, auch wenn der Text OCR-Fehler enthält
+2. Wenn nach einer Tabelle oder Übersicht gefragt wird, erstelle eine Markdown-Tabelle
+3. Für einfache Fragen: Beantworte direkt und präzise
+4. Für Erklärungen und Zusammenfassungen: Erkläre ausführlich und verständlich (5-10 Sätze)
+5. Falls die gesuchte Information wirklich nicht vorhanden ist, sage: "Die Antwort ist in den Dokumenten nicht enthalten."
+
+BEISPIEL TABELLE:
+| Monat | Jahr | Betrag | Arbeitgeber |
+|-------|------|--------|-------------|
+| Mai | 2023 | 4.500€ | IAV |
+| Juni | 2023 | 4.600€ | CARIAD |
 
 DOKUMENTE:
 {context}
@@ -172,25 +178,18 @@ ANTWORT:"""
         return 'en'
     
     def _extract_metadata_filter(self, question: str) -> Optional[Dict]:
-        """Extract metadata filters from question."""
-        filter_dict = {}
+        """
+        Extract metadata filters from question.
         
-        # Extract correspondent names
-        correspondent_patterns = [
-            r'bei\s+(\w+)',
-            r'von\s+(\w+)',
-            r'at\s+(\w+)',
-            r'from\s+(\w+)',
-        ]
-        for pattern in correspondent_patterns:
-            match = re.search(pattern, question, re.IGNORECASE)
-            if match:
-                correspondent = match.group(1).capitalize()
-                if len(correspondent) > 2:
-                    filter_dict['correspondent'] = correspondent
-                    break
+        Only extracts filters for known organizations/companies to avoid false matches
+        with names like "Luke", "Amazon" (pet names, people, etc.).
         
-        return filter_dict if filter_dict else None
+        DISABLED for now to prevent false filtering. Re-enable when we have a proper
+        correspondent name/ID mapping.
+        """
+        # TODO: Re-enable with proper correspondent matching
+        # Need to map correspondent names to IDs or match against known list
+        return None
     
     def query(self, question: str, n_results: int = None, min_score: float = 0.50) -> Dict:
         """
@@ -200,6 +199,7 @@ ANTWORT:"""
             question: User question
             n_results: Number of chunks to retrieve (default from settings)
             min_score: Minimum similarity score to include (default: 0.50 for better precision)
+                      Lower for analytical queries (tables, lists) to catch more docs
             
         Returns:
             Dict with 'answer', 'sources', 'context', 'method', 'metrics'
@@ -235,7 +235,8 @@ ANTWORT:"""
                 ]
                 is_analytical = any(kw in question.lower() for kw in analytical_keywords)
                 if is_analytical:
-                    n_results = min(n_results * 3, 10)  # More results but capped
+                    n_results = min(n_results * 6, 30)  # More results for aggregation queries
+                    min_score = 0.20  # Lower threshold for analytical queries (allows more recall)
                 
                 # Extract metadata filter
                 metadata_filter = self._extract_metadata_filter(question)
@@ -278,7 +279,8 @@ ANTWORT:"""
                 # Dynamic min-score threshold based on BM25 scores - More conservative
                 # High BM25 = strong keyword match = lower threshold acceptable
                 # Low BM25 = semantic only = stricter threshold
-                if results and self.use_hybrid:
+                # SKIP for analytical queries (they need broader recall)
+                if results and self.use_hybrid and not is_analytical:
                     top_bm25 = max([r.get('bm25_score', 0) for r in results])
                     
                     if top_bm25 > 15.0:
@@ -286,8 +288,9 @@ ANTWORT:"""
                         dynamic_threshold = max(min_score * 0.85, 0.45)  # But not below 0.45
                         logger.debug(f"Dynamic threshold: {dynamic_threshold:.2f} (high BM25: {top_bm25:.2f})")
                     elif top_bm25 < 2.0:
-                        # Weak keyword match - rely on semantic, be very strict
-                        dynamic_threshold = min(min_score * 1.3, 0.75)
+                        # Weak or no keyword match - rely on semantic, be VERY strict
+                        # Raise threshold to prevent generic/academic documents from matching
+                        dynamic_threshold = min(min_score * 1.5, 0.75)
                         logger.debug(f"Dynamic threshold: {dynamic_threshold:.2f} (low BM25: {top_bm25:.2f})")
                     else:
                         # Medium keyword match - use default
@@ -299,6 +302,19 @@ ANTWORT:"""
                 # Filter by minimum score
                 if min_score > 0:
                     results = [r for r in results if r.get('score', 0) >= min_score]
+                
+                # Additional filtering: If we have strong BM25 matches, filter out BA thesis / academic docs
+                # Only filter out results with BOTH: (1) BM25=0 AND (2) very low semantic score
+                # This prevents BA thesis from appearing but keeps specific documents like "Rechnung Leia"
+                if self.use_hybrid and results:
+                    has_strong_bm25 = any(r.get('bm25_score', 0) > 10.0 for r in results)
+                    if has_strong_bm25:
+                        # Only filter out results with BM25=0 AND dense < 0.52 (very weak semantic match)
+                        # This removes generic/academic docs (dense ~0.52) but keeps specific receipts (dense >0.52)
+                        before_count = len(results)
+                        results = [r for r in results if r.get('bm25_score', 0) > 0 or r.get('dense_score', 0) >= 0.52]
+                        if len(results) < before_count:
+                            logger.debug(f"Filtered out {before_count - len(results)} pure-semantic weak results")
                 
                 num_filtered = len(results)
                 
@@ -365,6 +381,7 @@ ANTWORT:"""
                 
                 try:
                     logger.debug(f"Prompt length: {len(prompt)} chars")
+                    logger.debug(f"Full prompt being sent to LLM:\n{'-'*80}\n{prompt}\n{'-'*80}")
                     
                     # Estimate input tokens (rough: 1 token ≈ 4 chars for English/German)
                     tokens_input = len(prompt) // 4

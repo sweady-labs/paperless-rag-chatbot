@@ -52,3 +52,22 @@ class PaperlessClient:
         )
         response.raise_for_status()
         return response.content
+    
+    def update_document(self, doc_id: int, data: Dict) -> Dict:
+        """
+        Update document metadata (title, tags, correspondent, etc.)
+        
+        Args:
+            doc_id: Document ID to update
+            data: Dict with fields to update (e.g., {'title': 'New Title'})
+        
+        Returns:
+            Updated document data
+        """
+        response = requests.patch(
+            f"{self.base_url}/api/documents/{doc_id}/",
+            headers=self.headers,
+            json=data
+        )
+        response.raise_for_status()
+        return response.json()

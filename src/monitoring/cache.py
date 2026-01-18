@@ -124,10 +124,29 @@ class QueryCache:
             Cache key of similar query, or None
         """
         normalized_query = self._normalize_query(query)
+        query_words = normalized_query.split()
         
         # Check each cached query for similarity
         for cache_key, entry in self._cache.items():
             normalized_cached = self._normalize_query(entry.query)
+            cached_words = normalized_cached.split()
+            
+            # IMPORTANT: If queries contain proper nouns (capitalized words), 
+            # require EXACT match on those words to prevent "Luke" matching "Leia"
+            original_query_words = query.split()
+            original_cached_words = entry.query.split()
+            
+            has_proper_nouns = any(w[0].isupper() for w in original_query_words if w)
+            has_cached_proper_nouns = any(w[0].isupper() for w in original_cached_words if w)
+            
+            if has_proper_nouns or has_cached_proper_nouns:
+                # Extract proper nouns (capitalized words not at start)
+                query_nouns = {w.lower() for i, w in enumerate(original_query_words) if i > 0 and w and w[0].isupper()}
+                cached_nouns = {w.lower() for i, w in enumerate(original_cached_words) if i > 0 and w and w[0].isupper()}
+                
+                # If proper nouns don't match, skip fuzzy matching
+                if query_nouns != cached_nouns:
+                    continue
             
             # Use SequenceMatcher for similarity
             similarity = difflib.SequenceMatcher(

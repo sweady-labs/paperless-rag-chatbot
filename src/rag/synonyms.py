@@ -40,6 +40,8 @@ GERMAN_SYNONYMS: Dict[str, List[str]] = {
     'versicherung': ['assekuranz', 'police'],
     'steuer': ['abgabe', 'tribut'],
     'gehalt': ['lohn', 'verdienst', 'einkommen', 'bezüge'],
+    'gehaltsabrechnung': ['entgeltabrechnung', 'lohnabrechnung', 'lohnzettel'],
+    'entgeltabrechnung': ['gehaltsabrechnung', 'lohnabrechnung'],
     'konto': ['bankkonto', 'girokonto'],
     'kontoauszug': ['bankauszug', 'statement', 'kontoblatt'],
     'mahnung': ['zahlungserinnerung', 'inkasso'],
@@ -139,7 +141,7 @@ def should_expand_query(query: str) -> bool:
     """
     Determine if a query should be expanded with synonyms.
     
-    Only expand simple keyword queries, not complex questions.
+    Only expand simple keyword queries, not complex questions or queries with proper nouns/names.
     
     Args:
         query: Query string
@@ -147,6 +149,12 @@ def should_expand_query(query: str) -> bool:
     Returns:
         True if query should be expanded
     """
+    # Check for proper nouns BEFORE lowercasing
+    original_words = query.split()
+    for i, word in enumerate(original_words):
+        if i > 0 and word and word[0].isupper():  # Capitalized word not at start
+            return False
+    
     words = query.lower().split()
     
     # Don't expand empty queries

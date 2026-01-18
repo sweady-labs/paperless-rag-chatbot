@@ -37,6 +37,10 @@ Thumbs.db
 # Tests
 tests/comprehensive_test.py
 
+#scripts
+scripts/auto_title_documents.py
+
 # Readmes
 IMPROVEMENTS.md
+FUTURE_IMPROVEMENTS.md
 
