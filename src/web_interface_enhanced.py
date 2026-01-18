@@ -24,7 +24,7 @@ def query_chatbot(message, history):
         response = requests.post(
             f"{API_URL}/query",
             json={"question": message},
-            timeout=30
+            timeout=120  # 120s timeout for long table generation and explanations
         )
         
         if response.status_code == 200:

@@ -228,14 +228,16 @@ ANTWORT:"""
                 if n_results is None:
                     n_results = settings.TOP_K
                 
-                # Detect if analytical query (needs more context)
+                # Detect if analytical or detailed explanation query (needs more context)
                 analytical_keywords = [
                     'alle', 'gesamt', 'übersicht', 'liste', 'tabelle',
-                    'all', 'total', 'overview', 'list', 'table', 'every'
+                    'all', 'total', 'overview', 'list', 'table', 'every',
+                    'erkläre', 'erklär', 'beschreibe', 'beschreib', 'detailliert', 'ausführlich',
+                    'explain', 'describe', 'detailed', 'comprehensive', 'thoroughly'
                 ]
                 is_analytical = any(kw in question.lower() for kw in analytical_keywords)
                 if is_analytical:
-                    n_results = min(n_results * 6, 30)  # More results for aggregation queries
+                    n_results = min(n_results * 6, 30)  # More results for aggregation/explanation queries
                     min_score = 0.20  # Lower threshold for analytical queries (allows more recall)
                 
                 # Extract metadata filter
@@ -316,6 +318,13 @@ ANTWORT:"""
                         if len(results) < before_count:
                             logger.debug(f"Filtered out {before_count - len(results)} pure-semantic weak results")
                 
+                # Anti-hallucination: If top result has very low score, warn the LLM
+                # This prevents the LLM from making up answers when search quality is poor
+                low_confidence = False
+                if results and results[0].get('score', 0) < 0.35:
+                    low_confidence = True
+                    logger.warning(f"Low confidence search: top score = {results[0].get('score', 0):.3f}")
+                
                 num_filtered = len(results)
                 
                 # Log search results
@@ -369,6 +378,10 @@ ANTWORT:"""
                     )
                 
                 context = "\n\n---\n\n".join(context_parts)
+                
+                # Add low-confidence warning to context if needed
+                if low_confidence:
+                    context = "⚠️ WARNUNG: Suchergebnisse haben niedrige Relevanz. Antworte NUR wenn die Informationen klar in den Dokumenten stehen!\n\n" + context
                 
                 # 3. Select prompt based on language
                 language = self._detect_language(question)

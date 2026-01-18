@@ -56,7 +56,7 @@ def chat():
             response = requests.post(
                 f"{API_URL}/query",
                 json={"question": question, "n_results": 3},
-                timeout=30
+                timeout=120  # 120s timeout for long responses
             )
             
             latency = time.time() - start
