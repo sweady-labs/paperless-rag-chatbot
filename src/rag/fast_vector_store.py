@@ -54,13 +54,34 @@ class FastVectorStore:
         )
         self.dense_dim = MXBAI_EMBED_DIM
         
-        # Initialize Qdrant client (local file-based)
-        self.client = QdrantClient(path=self.db_path)
+        # Initialize Qdrant client based on mode
+        qdrant_mode = settings.QDRANT_MODE.lower()
+        
+        if qdrant_mode == 'docker':
+            logger.info(f"Connecting to Qdrant Docker at {settings.QDRANT_HOST}:{settings.QDRANT_PORT}")
+            
+            if settings.QDRANT_PREFER_GRPC:
+                logger.info(f"Using gRPC on port {settings.QDRANT_GRPC_PORT}")
+                self.client = QdrantClient(
+                    host=settings.QDRANT_HOST,
+                    port=settings.QDRANT_PORT,
+                    grpc_port=settings.QDRANT_GRPC_PORT,
+                    prefer_grpc=True
+                )
+            else:
+                self.client = QdrantClient(
+                    host=settings.QDRANT_HOST,
+                    port=settings.QDRANT_PORT
+                )
+        else:
+            # File-based mode (default)
+            logger.info(f"Using file-based Qdrant at {self.db_path}")
+            self.client = QdrantClient(path=self.db_path)
         
         # Ensure collection exists
         self._ensure_collection()
         
-        logger.info(f"FastVectorStore ready: {self.collection_name} (dim={self.dense_dim})")
+        logger.info(f"FastVectorStore ready: {self.collection_name} (dim={self.dense_dim}, mode={qdrant_mode})")
     
     def _ensure_collection(self):
         """Create collection if it doesn't exist."""

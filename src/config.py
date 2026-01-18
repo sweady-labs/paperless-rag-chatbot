@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     # ==========================================================================
     VECTOR_DB_PATH: str = Field(default='./data/vector_db')
     COLLECTION_NAME: str = Field(default='paperless_fast')
+    
+    # Qdrant Mode: 'file' (default) or 'docker'
+    QDRANT_MODE: str = Field(default='file')
+    QDRANT_HOST: str = Field(default='localhost')
+    QDRANT_PORT: int = Field(default=6333)
+    QDRANT_GRPC_PORT: int = Field(default=6334)
+    QDRANT_PREFER_GRPC: bool = Field(default=False)
 
     # ==========================================================================
     # Retrieval Settings
@@ -62,6 +69,15 @@ class Settings(BaseSettings):
     # ==========================================================================
     MAX_CONCURRENT_QUERIES: int = Field(default=4)
     AUTO_INDEX: bool = Field(default=False)
+    
+    # Query Cache
+    ENABLE_CACHE: bool = Field(default=True)
+    CACHE_MAX_SIZE: int = Field(default=1000)
+    CACHE_TTL_SECONDS: int = Field(default=3600)  # 1 hour
+    CACHE_FUZZY_THRESHOLD: float = Field(default=0.85)  # 85% similarity
+    
+    # Query Enhancement
+    ENABLE_SYNONYM_EXPANSION: bool = Field(default=True)  # Expand German queries with synonyms
 
     # ==========================================================================
     # Legacy BGE-M3 Settings (kept for backwards compatibility)
